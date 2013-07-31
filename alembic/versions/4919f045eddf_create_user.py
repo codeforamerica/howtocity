@@ -1,5 +1,5 @@
 """create user table, user_connection table, 
-user_to_lesson table, rating table
+user_to_lesson table
 
 Revision ID: 4919f045eddf
 Revises: 1a27a3453938
@@ -26,15 +26,15 @@ def upgrade():
 	op.create_table(
 		'connection',
 		sa.Column('id', sa.Integer, primary_key=True),
-		sa.Column('user_id', sa.Integer, foreign_key=True),
+		sa.Column('user_id', sa.Integer, sa.ForeignKey('user.id')),
 		sa.Column('service', sa.Unicode(), nullable=False),
 		sa.Column('access_token', sa.Unicode(), nullable=False)
 		)
 	# TODO: implement the association between user and lesson
 	op.create_table(
 		'user_to_lesson',
-		sa.Column('uid', sa.Integer, foreign_key=True),
-		sa.Column('lessonid', sa.Integer, foreign_key=True),
+		sa.Column('user_id', sa.Integer, sa.ForeignKey('user.id')),
+		sa.Column('lesson_id', sa.Integer, sa.ForeignKey('lesson.id')),
 		sa.Column('start_dt', sa.DateTime(timezone=True),
 			default=datetime.utcnow()),
 		sa.Column('end_dt', sa.DateTime(timezone=True))
@@ -57,4 +57,3 @@ def downgrade():
 	op.drop_table('user')
 	op.drop_table('connection')
 	op.drop_table('user_to_lesson')
-    pass

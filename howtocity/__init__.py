@@ -116,7 +116,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.Unicode, nullable=False, unique=True)
     password_digest = db.Column(db.Unicode, nullable=False)
-    lessons = relationship("UserLesson", backref="user")
+    lessons = db.relationship("UserLesson", backref="user")
 
     # TODO: Decide how strict this email validation should be
     # @validates('email')
@@ -155,13 +155,13 @@ class Connection(db.Model):
 
 class UserLesson(db.Model):
     __tablename__ = 'user_to_lesson'
-    user_id = Column(db.Integer, db.ForeignKey('user.id'),
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'),
         primary_key=True)
-    lesson_id = Column(db.Integer, db.ForeignKey('lesson.id'),
+    lesson_id = db.Column(db.Integer, db.ForeignKey('lesson.id'),
         primary_key=True)
-    start_dt = Column(db.DateTime, nullable=False)
-    end_dt = Column(db.DateTime, nullable=True)
-    lesson = relationship('Lesson', backref="user_assocs")
+    start_dt = db.Column(db.DateTime, nullable=False)
+    end_dt = db.Column(db.DateTime, nullable=True)
+    lesson = db.relationship('Lesson', backref="user_assocs")
 
     def __init__(self, start_dt=None, end_dt=None):
         self.start_dt = start_dt | DateTime.now()
