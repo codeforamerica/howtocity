@@ -21,7 +21,7 @@ def upgrade():
 		'user',
 		sa.Column('id', sa.Integer, primary_key=True),
 		sa.Column('email', sa.Unicode(), unique=True, nullable=False),
-		sa.Column('password_digest', sa.Unicode(), nullable=False)
+		sa.Column('password', sa.Unicode(), nullable=False)
 		)
 	op.create_table(
 		'connection',
@@ -54,6 +54,6 @@ def upgrade():
 
 
 def downgrade():
-	op.drop_table('user')
-	op.drop_table('connection')
 	op.drop_table('user_to_lesson')
+	op.drop_table('connection')
+	op.drop_table('user')

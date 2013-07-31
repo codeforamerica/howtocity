@@ -19,10 +19,8 @@ heroku = Heroku(app) # Sets CONFIG automagically
 app.config.update(
     DEBUG = True,
     SQLALCHEMY_DATABASE_URI = 'postgres://postgres:root@localhost/howtocity',
-    SECRET_KEY = '123456'
+    SECRET_KEY = os.environ.get('SECRET_KEY')
 )
-
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
 
 db = SQLAlchemy(app)
 
@@ -115,7 +113,7 @@ class Thing_to_remember(db.Model):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.Unicode, nullable=False, unique=True)
-    password_digest = db.Column(db.Unicode, nullable=False)
+    password = db.Column(db.String, nullable=False)
     lessons = db.relationship("UserLesson", backref="user")
 
     # TODO: Decide how strict this email validation should be
@@ -123,9 +121,10 @@ class User(db.Model):
     # def validate_email(self, key, address):
     #     pass
 
-    def __init__(self, email, password):
-        self.email = email
-        self.password_digest = self.pw_digest(password)
+    def __init__(self, email=None, password=None):
+        self.email = str(email)
+        password = str(password)
+        self.password = self.pw_digest(password)
 
     def __repr__(self):
         return "User email: %s, id: %s" %(self.email, self.id)
@@ -136,7 +135,7 @@ class User(db.Model):
         return '%s$%s' % (salt, hsh)
 
     def check_pw(self, raw_password):
-        salt, hsh = self.password_digest.split('$')
+        salt, hsh = self.password.split('$')
         return hashlib.sha256(salt + raw_password) == hsh
 
 class Connection(db.Model):
@@ -164,7 +163,7 @@ class UserLesson(db.Model):
     lesson = db.relationship('Lesson', backref="user_assocs")
 
     def __init__(self, start_dt=None, end_dt=None):
-        self.start_dt = start_dt | DateTime.now()
+        self.start_dt = start_dt 
         self.end_dt = end_dt
 
     def __repr__(self):
@@ -200,6 +199,7 @@ manager.create_api(Category, methods=['GET', 'POST', 'DELETE'], url_prefix='/api
 manager.create_api(Lesson, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='lessons')
 manager.create_api(Step, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='steps')
 manager.create_api(User, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='users')
+manager.create_api(UserLesson, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='userlessons')
 
 
 # ADMIN ------------------------------------------------------------
@@ -220,10 +220,15 @@ class UserView(ModelView):
     column_display_pk = True
     column_auto_select_related = True
 
+class UserLessonView(ModelView):
+    column_display_pk = True
+    column_auto_select_related = True
+
 admin.add_view(CategoryView(Category, db.session))
 admin.add_view(LessonView(Lesson, db.session))
 admin.add_view(StepView(Step, db.session))
 admin.add_view(UserView(User, db.session))
+admin.add_view(UserLessonView(UserLesson, db.session))
 
 # Functions --------------------------------------------------------
 
