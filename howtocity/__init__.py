@@ -7,6 +7,7 @@ from flask.ext.heroku import Heroku
 import os, requests, json, time
 import auth
 import logging
+from datetime import datetime
 #----------------------------------------
 # initialization
 #----------------------------------------
@@ -108,6 +109,63 @@ class Thing_to_remember(db.Model):
 
     def __repr__(self):
         return self.thing_to_remember
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.Unicode, nullable=False, unique=True)
+    password = db.Column(db.Unicode, nullable=False)
+
+    # TODO: find out specifily what to save for pw
+    def __init__(self, email=None, password=None):
+        # TODO: Sanity check on email format (regex)
+        self.email = email
+        self.password = password
+
+    def __repr__(self):
+        # id or name?
+        return self.id
+
+class Connection(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, ForeignKey=True)
+    # TODO: Check 'dynamic'
+    user = db.relationship('User', backref=db.backref('connections', lazy='dynamic'))
+    service = db.Column(db.Unicode)
+    # TODO: encrypt the access token?
+    access_token = db.Column(db.Unicode)
+
+    def __init__(self, user=None, service=None, access_token=None):
+        self.user = user
+        # TODO: read more sqlalchemy to find out about the
+        # relationships and their syntax
+        self.user_id = user.id
+        self.service = service
+        self.access_token = access_token
+
+    def __repr__(self):
+        return self.id
+
+class Rating(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    # TODO: find ow to make the id/type a backref to type.id
+    subject_id = db.Column(db.Integer)
+    subject_type = db.Column(db.Unicode)
+    rating = db.Column(db.Integer)
+    time_stamp = db.Column(db.TIME())
+
+    def __init__(self, subject_id, subject_type=None, rating=None, 
+        time_stamp=datetime.now()):
+        self.subject_id = subject_id
+        self.subject_type = subject_type
+        self.rating = rating
+        self.time_stamp = time_stamp
+
+    def __repr__(self):
+        # ?
+        return self.id
+
+
+
 
 # API ------------------------------------------------------------
 manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
