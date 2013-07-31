@@ -1,10 +1,12 @@
-from flask import Flask, request, redirect
+from flask import Flask, request, redirect, session, url_for, render_template
 from flask.ext.sqlalchemy import SQLAlchemy
 import flask.ext.restless
 from flask.ext.admin.contrib.sqlamodel import ModelView
 from flask.ext.admin import Admin
 from flask.ext.heroku import Heroku
 import os, requests, json, time
+import auth
+import logging
 #----------------------------------------
 # initialization
 #----------------------------------------
@@ -13,9 +15,9 @@ app = Flask(__name__)
 heroku = Heroku(app) # Sets CONFIG automagically
 
 app.config.update(
-    # DEBUG = True,
-    # SQLALCHEMY_DATABASE_URI = 'postgres://hackyourcity@localhost/howtocity',
-    # SECRET_KEY = '123456'
+    DEBUG = True,
+    SQLALCHEMY_DATABASE_URI = 'postgres://postgres:root@localhost/howtocity',
+    SECRET_KEY = '123456'
 )
 
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
@@ -27,6 +29,8 @@ def add_cors_header(response):
     return response
 
 app.after_request(add_cors_header)
+facebook_remote_app = auth.open_remote_oauth('facebook')
+# # foursquare_remote_app = auth.open_remote_oauth('foursquare')
 
 #----------------------------------------
 # models
@@ -155,25 +159,18 @@ def autoconvert(s):
 @app.route('/logged_in', methods=['POST'])
 def logged_in():
     # Check if the user is logged into the service
-    access_token = request.args['access_token']
-    trigger_endpoint = request.form['triggerEndpoint']
-    trigger_check_endpoints = request.form['triggerCheck'].split(',')
-    trigger_value = request.form['triggerValue']
+    logged_in_key = request.form['lessonUrl'].lower() + '_logged_in'
+    print ("access token key is %s" % logged_in_key)
+    for key in session.iterkeys():
+        print key
     counter = 0
-    while counter < 60:
-        counter = counter + 1
-        r = requests.get(trigger_endpoint+access_token)
-        rjson = r.json()
-        for trigger_check_endpoint in trigger_check_endpoints:
-            try:
-                rjson = rjson[trigger_check_endpoint]
-            except KeyError:
-                # return 'The trigger check endpoint is set up wrong.'
-                pass
-        trigger_value = autoconvert(trigger_value)
-        if rjson == trigger_value:
+    while counter < 45:    
+        if logged_in_key in session and session[logged_in_key]:
+            print ("%s is in session" % logged_in_key)
             return '{"loggedIn":true}'
+        counter = counter + 1
         time.sleep(1)
+
     return 'TIMEOUT'
 
 @app.route('/check_for_new', methods=['POST'])
@@ -274,8 +271,97 @@ def choose_next_step():
     if choice == 'choice_two':
         return '{"chosenStep":"'+choice_two+'"}'
 
+@app.route('/facebook/login')
+def fb_login():
+    session.permanent = True
+    print("logging into fb")
+    if 'facebook_logged_in' in session and session['facebook_logged_in']:
+        return render_template('loggedin.html')
+    return facebook_remote_app.authorize(callback=url_for('fb_authorized', 
+        next=request.args.get('next') or request.referrer or None,
+        _external=True))
+
+
+@app.route('/facebook/authorized')
+@facebook_remote_app.authorized_handler
+def fb_authorized(resp):
+    if resp is None:
+        # TODO: failed authorize
+        pass
+    session['facebook_logged_in'] = True
+    print ("putting facebook_access_token into session")
+    print ("acess token =%s" % resp['access_token'])
+    session['facebook_access_token'] = (resp['access_token'], '')
+
+
+    return render_template('loggedin.html')
+
+@facebook_remote_app.tokengetter
+def get_fb_token(token=None):
+    return session.get('facebook_access_token')
+
+# @app.route('/foursquare/login')
+# def fs_login():
+
+    # if 'facebook_remote_app' not in session:
+    #     session['facebook_remote_app'] = auth.open_remote_oauth('facebook')
+    # if 'foursquare_logged_in' in session and session['foursquare_logged_in']:
+    #     return render_template('loggedin.html')
+
+#     return foursquare_remote_app.authorize(callback=url_for('fs_authorized', 
+#         next=request.args.get('next') or request.referrer or None,
+#         _external=True))
+
+
+# @app.route('/foursquare/authorized')
+# @foursquare_remote_app.authorized_handler
+# def fs_authorized(resp):
+#     if resp is None:
+#         # TODO: failed authorize
+#         pass
+#     session['foursquare_logged_in'] = True
+
+#     return render_template('loggedin')
+
+# @foursquare_remote_app.tokengetter
+# def get_fs_token(token=None):
+#     return session.get('foursquare_access_token')
+
+# def multi_authorized_handler(auth_func):
+#     service_name = request.path.split('/')[-2]
+#     service_app = session[service_name + '_remote_app']
+
+#     @service_app.authorized_handler
+#     def choose_auth_handler():
+#         auth_func()
+#     return choose_auth_handler
+
+
             
-        
+# @app.route('/<service_name>/login')
+# def login(service_name):
+#     service_app = auth.open_remote_oauth(service_name)
+#     session[service_name + '_remote_app'] = service_app
+
+#     return service_app.authorize(callback=url_for(service_name, 
+#         next=request.args.get('next') or request.referrer or None,
+#         _external=True))
+
+# @app.route('/<service_name>/authorized')
+# @multi_authorized_handler
+# def authorized(resp, service_name):
+
+#     next_url = request.args.get('next') or url_for('index')
+#     if resp is None:
+#         # TODO: Login failed
+#         pass
+
+#     session[service_name.lower() + 'logged_in'] = True
+
+#     # TODO: redirect somewhere?
+
+
+
 
 
 

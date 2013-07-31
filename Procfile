@@ -1,1 +1,1 @@
-web: gunicorn howtocity:app
+web: python runserver.py

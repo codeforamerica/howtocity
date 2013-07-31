@@ -1,0 +1,20 @@
+{
+    "facebook": {
+        "base_url": "https://graph.facebook.com/",
+        "request_token_url": "",
+        "access_token_url": "/oauth/access_token",
+        "authorize_url": "https://www.facebook.com/dialog/oauth",
+        "request_token_params": {
+            "scope": "manage_pages"
+        }
+    },
+    "foursquare": {
+        "base_url": "https:­//f­our­squ­are.co­m/",
+        "request_token_url": "",
+        "access_token_url": "/o­aut­h2/­acc­ess­_token",
+        "authorize_url": "/o­aut­h2/­aut­horize",
+        "request_token_params": {
+            "scope": "TODO"
+        }
+    }
+}
