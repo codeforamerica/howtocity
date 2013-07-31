@@ -35,17 +35,6 @@ facebook_remote_app = auth.open_remote_oauth('facebook')
 # # foursquare_remote_app = auth.open_remote_oauth('foursquare')
 
 
-def pw_digest(password):
-    salt = hashlib.sha256(str(os.urandom(24))).hexdigest()
-    hsh = hashlib.sha256(salt + password).hexdigest()
-    return '%s$%s' % (salt, hsh)
-
-def pw_check(raw_password, password_digest):
-    salt, hsh = password_digest.split('$')
-    return hashlib.sha256(salt + raw_password) == hsh
-
-
-
 #----------------------------------------
 # models
 #----------------------------------------
@@ -127,6 +116,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.Unicode, nullable=False, unique=True)
     password_digest = db.Column(db.Unicode, nullable=False)
+    lessons = relationship("UserLesson", backref="user")
 
     # TODO: Decide how strict this email validation should be
     # @validates('email')
@@ -135,17 +125,25 @@ class User(db.Model):
 
     def __init__(self, email, password):
         self.email = email
-        self.password_digest = pw_digest(password)
+        self.password_digest = self.pw_digest(password)
 
     def __repr__(self):
-        return self.id
+        return "User email: %s, id: %s" %(self.email, self.id)
+
+    def pw_digest(self, password):
+        salt = hashlib.sha256(str(os.urandom(24))).hexdigest()
+        hsh = hashlib.sha256(salt + password).hexdigest()
+        return '%s$%s' % (salt, hsh)
+
+    def check_pw(self, raw_password):
+        salt, hsh = self.password_digest.split('$')
+        return hashlib.sha256(salt + raw_password) == hsh
 
 class Connection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     user = db.relationship('User', backref=db.backref('connections', lazy='dynamic'))
     service = db.Column(db.Unicode)
-    # TODO: encrypt the access token?
     access_token = db.Column(db.Unicode)
 
     def __init__(self, service=None, access_token=None):
@@ -153,7 +151,24 @@ class Connection(db.Model):
         self.access_token = access_token
 
     def __repr__(self):
-        return self.id
+        return "Connection user_id: %s, service: %s" % (self.user_id, self.service)
+
+class UserLesson(db.Model):
+    __tablename__ = 'user_to_lesson'
+    user_id = Column(db.Integer, db.ForeignKey('user.id'),
+        primary_key=True)
+    lesson_id = Column(db.Integer, db.ForeignKey('lesson.id'),
+        primary_key=True)
+    start_dt = Column(db.DateTime, nullable=False)
+    end_dt = Column(db.DateTime, nullable=True)
+    lesson = relationship('Lesson', backref="user_assocs")
+
+    def __init__(self, start_dt=None, end_dt=None):
+        self.start_dt = start_dt | DateTime.now()
+        self.end_dt = end_dt
+
+    def __repr__(self):
+        return "User_to_lesson user_id: %s, lesson_id: %s" % (self.user_id, self.lesson_id)
 
 # TODO: Redesign steps/lessons to make them disjoin subtypes
 #       This will enable relationship Rating -> (step | lesson)
@@ -184,6 +199,8 @@ manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
 manager.create_api(Category, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='categories')
 manager.create_api(Lesson, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='lessons')
 manager.create_api(Step, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='steps')
+manager.create_api(User, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='users')
+
 
 # ADMIN ------------------------------------------------------------
 admin = Admin(app, name='How to City', url='/api/admin')
@@ -199,9 +216,14 @@ class StepView(ModelView):
 	column_display_pk = True
 	column_auto_select_related = True
 
+class UserView(ModelView):
+    column_display_pk = True
+    column_auto_select_related = True
+
 admin.add_view(CategoryView(Category, db.session))
 admin.add_view(LessonView(Lesson, db.session))
 admin.add_view(StepView(Step, db.session))
+admin.add_view(UserView(User, db.session))
 
 # Functions --------------------------------------------------------
 

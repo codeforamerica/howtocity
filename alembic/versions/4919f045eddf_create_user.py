@@ -13,31 +13,31 @@ down_revision = '1a27a3453938'
 
 from alembic import op
 import sqlalchemy as sa
+from datetime import datetime
 
 
 def upgrade():
-	# TODO: check timestamp types
 	op.create_table(
 		'user',
 		sa.Column('id', sa.Integer, primary_key=True),
-		# email instead of name
 		sa.Column('email', sa.Unicode(), unique=True, nullable=False),
-		# TODO: find out specifics of what to save for pw
 		sa.Column('password_digest', sa.Unicode(), nullable=False)
 		)
 	op.create_table(
-		'user_connection',
+		'connection',
 		sa.Column('id', sa.Integer, primary_key=True),
-		sa.Column('user_id', sa.Integer),
+		sa.Column('user_id', sa.Integer, foreign_key=True),
 		sa.Column('service', sa.Unicode(), nullable=False),
 		sa.Column('access_token', sa.Unicode(), nullable=False)
 		)
+	# TODO: implement the association between user and lesson
 	op.create_table(
 		'user_to_lesson',
 		sa.Column('uid', sa.Integer, foreign_key=True),
 		sa.Column('lessonid', sa.Integer, foreign_key=True),
-		sa.Column('start_dt', sa.Integer, nullable=False),
-		sa.Column('end_dt', sa.Integer, nullable=False)
+		sa.Column('start_dt', sa.DateTime(timezone=True),
+			default=datetime.utcnow()),
+		sa.Column('end_dt', sa.DateTime(timezone=True))
 		)
 	# TODO: Redesign steps/lessons to make them disjoin subtypes
 	#       This will enable relationship Rating -> (step | lesson)
@@ -54,4 +54,7 @@ def upgrade():
 
 
 def downgrade():
+	op.drop_table('user')
+	op.drop_table('connection')
+	op.drop_table('user_to_lesson')
     pass
