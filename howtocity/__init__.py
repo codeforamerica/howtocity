@@ -5,6 +5,7 @@ from flask.ext.admin.contrib.sqlamodel import ModelView
 from flask.ext.admin import Admin
 from flask.ext.heroku import Heroku
 import os, requests, json, time
+import hashlib
 import auth
 import logging
 from datetime import datetime
@@ -32,6 +33,18 @@ def add_cors_header(response):
 app.after_request(add_cors_header)
 facebook_remote_app = auth.open_remote_oauth('facebook')
 # # foursquare_remote_app = auth.open_remote_oauth('foursquare')
+
+
+def pw_digest(password):
+    salt = hashlib.sha256(str(os.urandom(24))).hexdigest()
+    hsh = hashlib.sha256(salt + password).hexdigest()
+    return '%s$%s' % (salt, hsh)
+
+def pw_check(raw_password, password_digest):
+    salt, hsh = password_digest.split('$')
+    return hashlib.sha256(salt + raw_password) == hsh
+
+
 
 #----------------------------------------
 # models
@@ -113,56 +126,55 @@ class Thing_to_remember(db.Model):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.Unicode, nullable=False, unique=True)
-    password = db.Column(db.Unicode, nullable=False)
+    password_digest = db.Column(db.Unicode, nullable=False)
 
-    # TODO: find out specifily what to save for pw
-    def __init__(self, email=None, password=None):
-        # TODO: Sanity check on email format (regex)
+    # TODO: Decide how strict this email validation should be
+    # @validates('email')
+    # def validate_email(self, key, address):
+    #     pass
+
+    def __init__(self, email, password):
         self.email = email
-        self.password = password
+        self.password_digest = pw_digest(password)
 
     def __repr__(self):
-        # id or name?
         return self.id
 
 class Connection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, ForeignKey=True)
-    # TODO: Check 'dynamic'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     user = db.relationship('User', backref=db.backref('connections', lazy='dynamic'))
     service = db.Column(db.Unicode)
     # TODO: encrypt the access token?
     access_token = db.Column(db.Unicode)
 
-    def __init__(self, user=None, service=None, access_token=None):
-        self.user = user
-        # TODO: read more sqlalchemy to find out about the
-        # relationships and their syntax
-        self.user_id = user.id
+    def __init__(self, service=None, access_token=None):
         self.service = service
         self.access_token = access_token
 
     def __repr__(self):
         return self.id
 
-class Rating(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    # TODO: find ow to make the id/type a backref to type.id
-    subject_id = db.Column(db.Integer)
-    subject_type = db.Column(db.Unicode)
-    rating = db.Column(db.Integer)
-    time_stamp = db.Column(db.TIME())
+# TODO: Redesign steps/lessons to make them disjoin subtypes
+#       This will enable relationship Rating -> (step | lesson)
+# class Rating(db.Model):
+#     id = db.Column(db.Integer, primary_key=True)
+#     # TODO: find ow to make the id/type a backref to type.id
+#     subject_id = db.Column(db.Integer)
+#     subject_type = db.Column(db.Unicode)
+#     rating = db.Column(db.Integer)
+#     time_stamp = db.Column(db.TIME())
 
-    def __init__(self, subject_id, subject_type=None, rating=None, 
-        time_stamp=datetime.now()):
-        self.subject_id = subject_id
-        self.subject_type = subject_type
-        self.rating = rating
-        self.time_stamp = time_stamp
+#     def __init__(self, subject_id, subject_type=None, rating=None, 
+#         time_stamp=datetime.now()):
+#         self.subject_id = subject_id
+#         self.subject_type = subject_type
+#         self.rating = rating
+#         self.time_stamp = time_stamp
 
-    def __repr__(self):
-        # ?
-        return self.id
+#     def __repr__(self):
+#         # ?
+#         return self.id
 
 
 
