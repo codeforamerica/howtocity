@@ -23,6 +23,7 @@ app.config.update(
 )
 
 db = SQLAlchemy(app)
+api_version = '/api/v1'
 
 def add_cors_header(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
@@ -113,7 +114,8 @@ class Thing_to_remember(db.Model):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.Unicode, nullable=False, unique=True)
-    password = db.Column(db.String, nullable=False)
+    password = db.Column(db.Unicode, nullable=False)
+    access_token = db.Column(db.Unicode, nullable=False)
     lessons = db.relationship("UserLesson", backref="user")
 
     # TODO: Decide how strict this email validation should be
@@ -124,12 +126,14 @@ class User(db.Model):
     def __init__(self, email=None, password=None):
         self.email = str(email)
         password = str(password)
+        self.access_token = hashlib.sha256(str(os.urandom(24))).hexdigest()
         self.password = self.pw_digest(password)
 
     def __repr__(self):
         return "User email: %s, id: %s" %(self.email, self.id)
 
     def pw_digest(self, password):
+        # Hash password, store it with random signature for rehash
         salt = hashlib.sha256(str(os.urandom(24))).hexdigest()
         hsh = hashlib.sha256(salt + password).hexdigest()
         return '%s$%s' % (salt, hsh)
@@ -137,6 +141,7 @@ class User(db.Model):
     def check_pw(self, raw_password):
         salt, hsh = self.password.split('$')
         return hashlib.sha256(salt + raw_password) == hsh
+
 
 class Connection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -195,11 +200,11 @@ class UserLesson(db.Model):
 
 # API ------------------------------------------------------------
 manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
-manager.create_api(Category, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='categories')
-manager.create_api(Lesson, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='lessons')
-manager.create_api(Step, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='steps')
-manager.create_api(User, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='users')
-manager.create_api(UserLesson, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='userlessons')
+manager.create_api(Category, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='categories')
+manager.create_api(Lesson, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='lessons')
+manager.create_api(Step, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='steps')
+manager.create_api(User, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='users')
+manager.create_api(UserLesson, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='userlessons')
 
 
 # ADMIN ------------------------------------------------------------
@@ -368,12 +373,49 @@ def choose_next_step():
     if choice == 'choice_two':
         return '{"chosenStep":"'+choice_two+'"}'
 
+@app.route(api_version + '/signup', methods=['POST'])
+def htc_signup():
+
+    # TODO: verify user is a person?
+    user_email = request.form['email']
+    user_pw = request.form['password']
+    cur_user = User(user_email, user_pw)
+    response = {}
+
+    if (User.query.filter_by(email=user_email).first()):
+        response['error'] = 'Email already in use.'
+        return json.dumps(response)
+    else:        
+        db.session.add(cur_user)
+        db.session.commit()
+
+    response['access_token'] = cur_user.access_token 
+    response['token_type'] = 'bearer'
+    response['email'] = cur_user.email
+    return json.dumps(response)
+
+
+@app.route('/howtocity/login', methods=['POST'])
+def htc_login():
+    user_email = request.form['email']
+    user_password = request.form['password']
+    cur_user = User.query.filter_by(email=user_email).first()
+    response = {}
+
+    if cur_user and cur_user.check_pw(user_password):
+        # User is valid, return credentials
+        response['access_token'] = cur_user.access_token
+        response['token_type'] = "bearer"
+        response['email'] = cur_user.email
+        return json.dumps(response)
+    else:
+        response['error'] = "Invalid login credentials."
+        return json.dumps(response)
+
+
 @app.route('/facebook/login')
 def fb_login():
-    session.permanent = True
-    print("logging into fb")
-    if 'facebook_logged_in' in session and session['facebook_logged_in']:
-        return render_template('loggedin.html')
+
     return facebook_remote_app.authorize(callback=url_for('fb_authorized', 
         next=request.args.get('next') or request.referrer or None,
         _external=True))

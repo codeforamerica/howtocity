@@ -21,7 +21,8 @@ def upgrade():
 		'user',
 		sa.Column('id', sa.Integer, primary_key=True),
 		sa.Column('email', sa.Unicode(), unique=True, nullable=False),
-		sa.Column('password', sa.Unicode(), nullable=False)
+		sa.Column('password', sa.Unicode(), nullable=False),
+		sa.Column('access_token', sa.Unicode(), unique=True, nullable=False)
 		)
 	op.create_table(
 		'connection',
