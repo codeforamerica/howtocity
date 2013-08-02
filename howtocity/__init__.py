@@ -5,6 +5,7 @@ from flask.ext.admin.contrib.sqlamodel import ModelView
 from flask.ext.admin import Admin
 from flask.ext.heroku import Heroku
 import hashlib
+import auth
 from datetime import datetime
 import os, requests, json, time
 from requests import get as http_get
@@ -20,19 +21,22 @@ app.config.update(
     DEBUG = True,
     # SQLALCHEMY_DATABASE_URI = 'postgres://hackyourcity@localhost/howtocity',
     SQLALCHEMY_DATABASE_URI = 'postgres://postgres:root@localhost/howtocity',
-    # SECRET_KEY = '123456'
+    # SECRET_KEY = '123456',
+    # OAUTHIO = True,
+    OAUTHIO = False
 )
-
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-
 db = SQLAlchemy(app)
 api_version = '/api/v1'
+app.after_request(add_cors_header)
+facebook_remote_app = auth.open_remote_oauth('facebook')
+# Table of all remote apps to be used by User class
+remote_apps = {'facebook': facebook_remote_app}
 
 def add_cors_header(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
-app.after_request(add_cors_header)
 
 #----------------------------------------
 # models
@@ -133,8 +137,11 @@ class User(db.Model):
         for connection in connections:
             if connection.service == service:
                 # TODO: change all existing endpoints to NOT include ?access_token=
-                return http_get(req_url + '?access_token=' + connection.access_token,
-                    headers={'User-Agent': 'Python'})
+                if app.config['OAUTHIO']:
+                    return http_get(req_url + '?access_token=' + connection.access_token,
+                        headers={'User-Agent': 'Python'})
+                else
+                    return remote_apps['service'].request(req_url, access_token)
 
 class Connection(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -402,6 +409,39 @@ def htc_login():
         response['error'] = "Invalid login credentials."
         return json.dumps(response)
 
+@app.route('/facebook/login', methods=['GET'])
+def fb_login():
+    session['htc_access_token'] = request.args.get('access_token')
+    if request.args.get('access_token') is None:
+        return None
+    return facebook_remote_app.authorize(callback=url_for('fb_authorized', 
+        next=request.args.get('next') or request.referrer or None,
+        _external=True))
+
+
+@app.route('/facebook/authorized')
+@facebook_remote_app.authorized_handler
+def fb_authorized(resp):
+    # TODO: Check responses on failed login etc
+    if resp is None:
+        # TODO: failed authorize
+        pass
+    cur_user = User.query.filter_by(access_token=session['htc_access_token']).first()
+    fb_access_token = (resp['access_token'], '')
+    cur_user.connections.append(Connection('facebook', fb_access_token))
+    db.session.commit()
+
+    return render_template('loggedin.html')
+
+# remote_app.request MUST pass in the htc access token
+@facebook_remote_app.tokengetter
+def get_fb_token(token):
+    cur_user = User.query.filter_by(access_token=token)
+    for connection in cur_user.connections:
+        if connection.service == 'facebook':
+            return connection.access_token
+
+    return None
 
 
 
