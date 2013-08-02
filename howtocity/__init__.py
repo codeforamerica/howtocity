@@ -1,10 +1,14 @@
-from flask import Flask, request, redirect, render_template
+from flask import Flask, request, redirect, render_template, url_for
 from flask.ext.sqlalchemy import SQLAlchemy
 import flask.ext.restless
 from flask.ext.admin.contrib.sqlamodel import ModelView
 from flask.ext.admin import Admin
 from flask.ext.heroku import Heroku
+import hashlib
+import auth
+from datetime import datetime
 import os, requests, json, time
+from requests import get as http_get
 #----------------------------------------
 # initialization
 #----------------------------------------
@@ -14,21 +18,25 @@ app = Flask(__name__)
 heroku = Heroku(app) # Sets CONFIG automagically
 
 app.config.update(
-    # DEBUG = True,
+    DEBUG = True,
     # SQLALCHEMY_DATABASE_URI = 'postgres://hackyourcity@localhost/howtocity',
-    # SQLALCHEMY_DATABASE_URI = 'postgres://postgres@localhost/howtocity',
-    # SECRET_KEY = '123456'
+    SQLALCHEMY_DATABASE_URI = 'postgres://postgres:root@localhost/howtocity',
+    # SECRET_KEY = '123456',
+    # OAUTHIO = True,
+    OAUTHIO = False
 )
-
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY')
-
 db = SQLAlchemy(app)
+api_version = '/api/v1'
+app.after_request(add_cors_header)
+facebook_remote_app = auth.open_remote_oauth('facebook')
+# Table of all remote apps to be used by User class
+remote_apps = {'facebook': facebook_remote_app}
 
 def add_cors_header(response):
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
 
-app.after_request(add_cors_header)
 
 #----------------------------------------
 # models
@@ -94,6 +102,78 @@ class Step(db.Model):
     def __repr__(self):
         return self.name
 
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.Unicode, nullable=False, unique=True)
+    password = db.Column(db.Unicode, nullable=False)
+    access_token = db.Column(db.Unicode, nullable=False)
+    lessons = db.relationship("UserLesson", backref="user")
+
+    # TODO: Decide how strict this email validation should be
+    # @validates('email')
+    # def validate_email(self, key, address):
+    #     pass
+
+    def __init__(self, email=None, password=None):
+        self.email = str(email)
+        password = str(password)
+        self.access_token = hashlib.sha256(str(os.urandom(24))).hexdigest()
+        self.password = self.pw_digest(password)
+
+    def __repr__(self):
+        return "User email: %s, id: %s" %(self.email, self.id)
+
+    def pw_digest(self, password):
+        # Hash password, store it with random signature for rehash
+        salt = hashlib.sha256(str(os.urandom(24))).hexdigest()
+        hsh = hashlib.sha256(salt + password).hexdigest()
+        return '%s$%s' % (salt, hsh)
+
+    def check_pw(self, raw_password):
+        salt, hsh = self.password.split('$')
+        return hashlib.sha256(salt + raw_password) == hsh
+
+    def make_authd_req(service, req_url):
+        for connection in connections:
+            if connection.service == service:
+                # TODO: change all existing endpoints to NOT include ?access_token=
+                if app.config['OAUTHIO']:
+                    return http_get(req_url + '?access_token=' + connection.access_token,
+                        headers={'User-Agent': 'Python'})
+                else
+                    return remote_apps['service'].request(req_url, access_token)
+
+class Connection(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    user = db.relationship('User', backref=db.backref('connections', lazy='dynamic'))
+    service = db.Column(db.Unicode)
+    access_token = db.Column(db.Unicode)
+
+    def __init__(self, service=None, access_token=None):
+        self.service = service
+        self.access_token = access_token
+
+    def __repr__(self):
+        return "Connection user_id: %s, service: %s" % (self.user_id, self.service)
+
+class UserLesson(db.Model):
+    __tablename__ = 'user_to_lesson'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'),
+        primary_key=True)
+    lesson_id = db.Column(db.Integer, db.ForeignKey('lesson.id'),
+        primary_key=True)
+    start_dt = db.Column(db.DateTime)
+    end_dt = db.Column(db.DateTime, nullable=True)
+    lesson = db.relationship('Lesson', backref="user_assocs")
+
+    def __init__(self, start_dt=None, end_dt=None):
+        self.start_dt = start_dt 
+        self.end_dt = end_dt
+
+    def __repr__(self):
+        return "User_to_lesson user_id: %s, lesson_id: %s" % (self.user_id, self.lesson_id)
+
 class Thing_to_remember(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     access_token = db.Column(db.Unicode)
@@ -111,6 +191,8 @@ manager = flask.ext.restless.APIManager(app, flask_sqlalchemy_db=db)
 manager.create_api(Category, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='categories')
 manager.create_api(Lesson, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='lessons')
 manager.create_api(Step, methods=['GET', 'POST', 'DELETE'], url_prefix='/api/v1', collection_name='steps')
+manager.create_api(User, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='users')
+manager.create_api(UserLesson, methods=['GET', 'POST', 'DELETE'], url_prefix=api_version, collection_name='userlessons')
 
 # ADMIN ------------------------------------------------------------
 admin = Admin(app, name='How to City', url='/api/admin')
@@ -126,9 +208,19 @@ class StepView(ModelView):
 	column_display_pk = True
 	column_auto_select_related = True
 
+class UserView(ModelView):
+    column_display_pk = True
+    column_auto_select_related = True
+
+class UserLessonView(ModelView):
+    column_display_pk = True
+    column_auto_select_related = True
+
 admin.add_view(CategoryView(Category, db.session))
 admin.add_view(LessonView(Lesson, db.session))
 admin.add_view(StepView(Step, db.session))
+admin.add_view(UserView(User, db.session))
+admin.add_view(UserLessonView(UserLesson, db.session))
 
 # Functions --------------------------------------------------------
 
@@ -153,33 +245,32 @@ def autoconvert(s):
             pass
     return s
 
+
 @app.route('/logged_in', methods=['POST'])
 def logged_in():
     # Check if the user is logged into the service
-    access_token = request.args['access_token']
-    trigger_endpoint = request.form['triggerEndpoint']
-    trigger_check_endpoints = request.form['triggerCheck'].split(',')
-    trigger_value = request.form['triggerValue']
+    htc_access = request.form['access_token']
+    service_name = request.form['lessonUrl'].lower()
+    user = User.query.filter_by(access_token=htc_access).first()
+    response = {}
+
     counter = 0
-    while counter < 60:
+    while counter < 30:    
+        for connection in user.connections:
+            if connection.service == service_name:
+                response['loggedIn'] = True
+                return json.dumps(response)
         counter = counter + 1
-        r = requests.get(trigger_endpoint+access_token)
-        rjson = r.json()
-        for trigger_check_endpoint in trigger_check_endpoints:
-            try:
-                rjson = rjson[trigger_check_endpoint]
-            except KeyError:
-                # return 'The trigger check endpoint is set up wrong.'
-                pass
-        trigger_value = autoconvert(trigger_value)
-        if rjson == trigger_value:
-            return '{"loggedIn":true}'
         time.sleep(1)
-    return 'TIMEOUT'
+
+    response['error'] = 'TIMEOUT'
+    return json.dups(response)
 
 @app.route('/check_for_new', methods=['POST'])
 def check_for_new():
-    access_token = request.args['access_token']
+    htc_access = request.args['access_token']
+    cur_user = User.query.filter_by(access_token=htc_access).first()
+    service_name = request.form['lessonUrl'].lower()
     trigger_endpoint = request.form['triggerEndpoint']
     trigger_check_endpoints = request.form['triggerCheck'].split(',')
     trigger_value_endpoints = request.form['triggerValue'].split(',')
@@ -191,7 +282,7 @@ def check_for_new():
     while timer < 60:
         timer = timer + 1
         # while not trigger:
-        r = requests.get(trigger_endpoint+access_token)
+        r = cur_user.make_authd_req(service_name, trigger_endpoint)
         rjson = r.json()
         for trigger_check_endpoint in trigger_check_endpoints:
             rjson = rjson[trigger_check_endpoint]
@@ -220,7 +311,9 @@ def check_for_new():
 
 @app.route('/get_remembered_thing', methods=['POST'])
 def get_remembered_thing():
-    access_token = request.args['access_token']
+    htc_access = request.args['access_token']
+    cur_user = User.query.filter_by(access_token=htc_access).first()
+    service_name = request.form['lessonUrl'].lower()
     trigger_endpoint = request.form['triggerEndpoint']
     trigger_check_endpoint = request.form['triggerCheck']
     trigger_value_endpoint = request.form['triggerValue']
@@ -229,7 +322,7 @@ def get_remembered_thing():
     trigger_endpoint = trigger_endpoint.replace('replace_me',str(thing_to_remember))
     counter = 0
     while counter < 60:
-        r = requests.get(trigger_endpoint+access_token)
+        r = cur_user.make_authd_req(service_name, trigger_endpoint)
         rjson = r.json()
         if trigger_check_endpoint in rjson:
             # if trigger_value_endpoint in rjson:
@@ -242,7 +335,9 @@ def get_remembered_thing():
 @app.route('/get_added_data', methods=['POST'])
 def get_added_data():
     # Doesn't actually need to return the photo from FB.
-    access_token = request.args['access_token']
+    htc_access = request.args['access_token']
+    cur_user = User.query.filter_by(access_token=htc_access).first()
+    service_name = request.form['lessonUrl'].lower()
     trigger_endpoint = request.form['triggerEndpoint']
     trigger_check_endpoints = request.form['triggerCheck'].split(',')
     trigger_value = request.form['triggerValue']
@@ -252,7 +347,7 @@ def get_added_data():
     trigger_endpoint = trigger_endpoint.replace('replace_me',str(thing_to_remember))
     counter = 0
     while counter < 60:
-        r = requests.get(trigger_endpoint+access_token)
+        r = cur_user.make_authd_req(service_name, trigger_endpoint)
         rjson = r.json()
         # Check if certain endpoint equals something
         trigger_check = get_data_at_endpoint(rjson, trigger_check_endpoints)
@@ -275,6 +370,78 @@ def choose_next_step():
     if choice == 'choice_two':
         return '{"chosenStep":"'+choice_two+'"}'
 
+@app.route(api_version + '/signup', methods=['POST'])
+def htc_signup():
+
+    # TODO: verify user is a person?
+    user_email = request.form['email']
+    user_pw = request.form['password']
+    cur_user = User(user_email, user_pw)
+    response = {}
+
+    if (User.query.filter_by(email=user_email).first()):
+        response['error'] = 'Email already in use.'
+        return json.dumps(response)
+    else:        
+        db.session.add(cur_user)
+        db.session.commit()
+
+    response['access_token'] = cur_user.access_token 
+    response['token_type'] = 'bearer'
+    response['email'] = cur_user.email
+    return json.dumps(response)
+
+
+@app.route('/login', methods=['POST'])
+def htc_login():
+    user_email = request.form['email']
+    user_password = request.form['password']
+    cur_user = User.query.filter_by(email=user_email).first()
+    response = {}
+
+    if cur_user and cur_user.check_pw(user_password):
+        # User is valid, return credentials
+        response['access_token'] = cur_user.access_token
+        response['token_type'] = "bearer"
+        response['email'] = cur_user.email
+        return json.dumps(response)
+    else:
+        response['error'] = "Invalid login credentials."
+        return json.dumps(response)
+
+@app.route('/facebook/login', methods=['GET'])
+def fb_login():
+    session['htc_access_token'] = request.args.get('access_token')
+    if request.args.get('access_token') is None:
+        return None
+    return facebook_remote_app.authorize(callback=url_for('fb_authorized', 
+        next=request.args.get('next') or request.referrer or None,
+        _external=True))
+
+
+@app.route('/facebook/authorized')
+@facebook_remote_app.authorized_handler
+def fb_authorized(resp):
+    # TODO: Check responses on failed login etc
+    if resp is None:
+        # TODO: failed authorize
+        pass
+    cur_user = User.query.filter_by(access_token=session['htc_access_token']).first()
+    fb_access_token = (resp['access_token'], '')
+    cur_user.connections.append(Connection('facebook', fb_access_token))
+    db.session.commit()
+
+    return render_template('loggedin.html')
+
+# remote_app.request MUST pass in the htc access token
+@facebook_remote_app.tokengetter
+def get_fb_token(token):
+    cur_user = User.query.filter_by(access_token=token)
+    for connection in cur_user.connections:
+        if connection.service == 'facebook':
+            return connection.access_token
+
+    return None
 
 
 
